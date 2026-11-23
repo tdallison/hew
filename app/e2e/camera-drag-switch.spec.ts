@@ -148,6 +148,38 @@ test('Select tool (middle-drag): Shift mid-drag switches orbit to pan, and back 
   await page.mouse.up({ button: 'middle' })
 })
 
+test('Select tool (right-drag): orbit switches to pan and back without starting Fly', async ({ page }) => {
+  const { cx, cy } = await setup(page)
+  await page.keyboard.press(' ')
+  await page.mouse.move(cx, cy)
+  await page.mouse.down({ button: 'right' })
+  const start = await getCam(page)
+  await page.mouse.move(cx + 100, cy, { steps: 10 })
+  await page.waitForTimeout(50)
+  const orbited = await getCam(page)
+  expect(dist(orbited.target, start.target)).toBeLessThan(1e-6)
+  expect(dist(eyeDir(orbited), eyeDir(start))).toBeGreaterThan(0.01)
+
+  await page.keyboard.down('Shift')
+  await page.waitForTimeout(100)
+  const beforePan = await getCam(page)
+  await page.mouse.move(cx + 200, cy, { steps: 10 })
+  await page.waitForTimeout(50)
+  const panned = await getCam(page)
+  expect(dist(panned.target, beforePan.target)).toBeGreaterThan(0.01)
+  expect(dist(eyeDir(panned), eyeDir(beforePan))).toBeLessThan(0.02)
+
+  await page.keyboard.up('Shift')
+  await page.waitForTimeout(50)
+  const beforeOrbit = await getCam(page)
+  await page.mouse.move(cx + 300, cy, { steps: 10 })
+  await page.waitForTimeout(50)
+  const orbitedAgain = await getCam(page)
+  expect(dist(orbitedAgain.target, beforeOrbit.target)).toBeLessThan(1e-6)
+  expect(dist(eyeDir(orbitedAgain), eyeDir(beforeOrbit))).toBeGreaterThan(0.01)
+  await page.mouse.up({ button: 'right' })
+})
+
 test('Orbit tool: precise orbit (Ctrl/Cmd) kills inertia; the default drag coasts; Ctrl mid-coast stops the tail; Ctrl still orbits', async ({ page }) => {
   const { cx, cy } = await setup(page)
   await page.keyboard.press('o')

@@ -188,14 +188,31 @@ describe('CameraRig — ortho framing (frameOrthoToRadius)', () => {
     expect(rig.orthographic.left).toBeCloseTo(-4.8 * 1.5, 9)
     expect(rig.orthographic.zoom).toBe(1)
   })
+
+  it('fits both axes in a portrait viewport and in the area left by docks', () => {
+    const rig = new CameraRig(0.5)
+    rig.frameOrthoToRadius(4, 1.2, 0.5)
+    expect(rig.orthographic.right).toBeCloseTo(4.8, 9)
+    expect(rig.orthographic.top).toBeCloseTo(9.6, 9)
+    rig.frameOrthoToRadius(4, 1.2, 2, 0.5)
+    expect(rig.orthographic.top).toBeCloseTo(9.6, 9)
+    expect(rig.orthographic.right).toBeCloseTo(19.2, 9)
+  })
 })
 
 describe('CameraRig — perspectiveFramingDistance', () => {
-  it('matches radius * margin / tanHalfFov', () => {
+  it('fits the entire sphere including its depth within the limiting field of view', () => {
     const rig = new CameraRig(1)
     rig.setFov(60)
     const d = rig.perspectiveFramingDistance(5, 1.2)
-    expect(d).toBeCloseTo((5 * 1.2) / tanHalfFovRad(60), 9)
+    expect(d).toBeCloseTo((5 * 1.2) / Math.sin(Math.PI / 6), 9)
+  })
+
+  it('uses the horizontal field of view in a narrow available area', () => {
+    const rig = new CameraRig(0.5)
+    const halfAngle = Math.atan(tanHalfFovRad(45) * 0.5)
+    expect(rig.perspectiveFramingDistance(5, 1.2)).toBeCloseTo(6 / Math.sin(halfAngle), 9)
+    expect(rig.perspectiveFramingDistance(5, 1.2, 0.25)).toBeGreaterThan(rig.perspectiveFramingDistance(5, 1.2))
   })
 })
 

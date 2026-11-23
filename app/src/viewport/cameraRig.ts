@@ -299,21 +299,24 @@ export class CameraRig {
     return frustumHeight / (this.orthographic.zoom * 2 * referenceTanHalf)
   }
 
-  /** Perspective distance that fits a sphere of `radius` within the vertical
-   * fov with `margin` slack (e.g. 1.2 — SketchUp's own Zoom Extents/standard-
+  /** Perspective distance that fits a sphere of `radius` within both axes
+   * with `margin` slack (e.g. 1.2 — SketchUp's own Zoom Extents/standard-
    * view margin). Framing (`zoomExtents`/`setStandardView`) uses this for
    * BOTH projections' camera *position* (see module doc) — only the
    * orthographic *frustum* additionally needs `frameOrthoToRadius`. */
-  perspectiveFramingDistance(radius: number, margin: number): number {
-    return (radius * margin) / tanHalfFovRad(this.perspective.fov)
+  perspectiveFramingDistance(radius: number, margin: number, availableAspect = this.perspective.aspect): number {
+    const aspect = Number.isFinite(availableAspect) && availableAspect > 0 ? availableAspect : 1
+    const limitingHalfAngle = Math.atan(tanHalfFovRad(this.perspective.fov) * Math.min(1, aspect))
+    return (radius * margin) / Math.sin(limitingHalfAngle)
   }
 
   /** Size the orthographic frustum (half-height `radius · margin`, half-width
    * scaled by `aspect`, zoom reset to 1) to fit a sphere of `radius` — the
    * parallel-projection analogue of `perspectiveFramingDistance` (design §1,
    * "Framing"). Does not touch camera position/orientation. */
-  frameOrthoToRadius(radius: number, margin: number, aspect: number): void {
-    const halfH = radius * margin
+  frameOrthoToRadius(radius: number, margin: number, aspect: number, availableAspect = aspect): void {
+    const fitAspect = Number.isFinite(availableAspect) && availableAspect > 0 ? availableAspect : 1
+    const halfH = radius * margin * Math.max(1, 1 / fitAspect)
     const halfW = halfH * aspect
     this.orthographic.left = -halfW
     this.orthographic.right = halfW

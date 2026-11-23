@@ -51,6 +51,7 @@ import { ComponentsPanel, PurgeUnusedButton } from './panels/ComponentsPanel'
 import { ConfirmDialog } from './panels/ConfirmDialog'
 import { ScenesPanel, ScenesAddButton, useSceneRenameState } from './panels/ScenesPanel'
 import { ObjectInfoPanel } from './panels/ObjectInfoPanel'
+import { worldBoundsForSelection } from './panels/objectBounds'
 import { TraySection } from './panels/TraySection'
 import { ChangesPanel } from './panels/ChangesPanel'
 import { ModelHealthPanel, selectionObjectIds } from './panels/ModelHealthPanel'
@@ -4130,6 +4131,12 @@ export default function App() {
   const handleZoomExtents = useCallback(() => {
     viewportApi.current?.zoomExtents()
   }, [])
+  const handleFocusSelection = useCallback(() => {
+    const scene = sceneRef.current
+    if (scene === null) return
+    const bounds = worldBoundsForSelection(scene, selectedIds)
+    if (bounds !== null) viewportApi.current?.zoomToWorldBounds([...bounds.min], [...bounds.max])
+  }, [selectedIds])
 
   // ---------------------------------------------------------------- glTF export
   const exportGltf = useCallback(async () => {
@@ -5635,8 +5642,7 @@ export default function App() {
       case 'tool-zoom-window': activateTool('Zoom Window'); break
       /* oxlint-enable lingui/no-unlocalized-strings */
       case 'toggle-parallel-projection': viewportApi.current?.toggleProjection(); break
-      // Camera ▸ Fly (docs/design/fly-navigation.md §10): the LATCHED fly
-      // mode for trackpads — a hold of the right button needs no menu.
+      // Camera ▸ Fly is the separate flight mode.
       case 'toggle-fly':          viewportApi.current?.toggleFlyLatched(); break
       // Window pane toggles — must use functional updaters (StrictMode safe)
       case 'toggle-model-info':   toggleSection(setShowModelInfo, trayTitle.outliner); break
@@ -7301,6 +7307,7 @@ export default function App() {
           clipboardHasContent: menuGates?.clipboardHasContent ?? false,
         }}
         onZoomExtents={handleZoomExtents}
+        onFocusSelection={handleFocusSelection}
         onStandardView={(view) => viewportApi.current?.setStandardView(view)}
         parallelProjectionChecked={parallelProjection}
         onToggleParallelProjection={() => viewportApi.current?.toggleProjection()}

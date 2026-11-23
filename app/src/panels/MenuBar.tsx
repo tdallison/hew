@@ -233,6 +233,8 @@ export interface MenuBarProps {
   }
   /** Zoom the camera to fit all scene geometry (View → Zoom Extents). */
   onZoomExtents?: () => void
+  /** Frame the selected objects, groups, or component instances. */
+  onFocusSelection?: () => void
   /** View ▸ Scenes ▸ Add Scene (docs/design/scenes.md §5). */
   onScenesAdd?: () => void
   /** View ▸ Scenes ▸ Update Scene — re-captures the active Scene's checked
@@ -257,9 +259,7 @@ export interface MenuBarProps {
   parallelProjectionChecked?: boolean
   /** Toggle Camera ▸ Parallel Projection. */
   onToggleParallelProjection?: () => void
-  /** Camera ▸ Fly check state — the LATCHED fly mode (docs/design/
-   *  fly-navigation.md §10), for trackpads; a right-button hold flies
-   *  under any tool without it. */
+  /** Camera ▸ Fly check state. */
   flyChecked?: boolean
   /** Toggle Camera ▸ Fly. */
   onToggleFly?: () => void
@@ -788,6 +788,7 @@ export function MenuBar({
   onEditAction,
   editGates,
   onZoomExtents,
+  onFocusSelection,
   onDrawText,
   onScenesAdd,
   onScenesUpdate,
@@ -1318,9 +1319,7 @@ export function MenuBar({
               checked={activeTool === T.LookAround}
               onClick={withClose(() => onSelectTool?.(T.LookAround))}
             />
-            {/* Fly (docs/design/fly-navigation.md): hold the right mouse
-                button to fly under any tool; this entry LATCHES the same
-                flight on for trackpads (§10) — a check, not a tool. */}
+            {/* Fly remains available as an explicit camera mode. */}
             <CheckMenuItem
               label={t`Fly`}
               checked={flyChecked ?? false}
@@ -1338,6 +1337,10 @@ export function MenuBar({
             <MenuItem
               label={t`Zoom Extents`}
               onClick={withClose(() => onZoomExtents?.())}
+            />
+            <MenuItem
+              label={t`Focus Selection`}
+              onClick={withClose(() => onFocusSelection?.())}
             />
             <div style={SEPARATOR_STYLE} />
             <CheckMenuItem

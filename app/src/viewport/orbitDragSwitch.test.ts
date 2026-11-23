@@ -57,10 +57,10 @@ describe('orbitDragState', () => {
 })
 
 describe('baseBindingFor / desiredDragState', () => {
-  it('middle is always orbit; right is Fly, never a switchable drag', () => {
+  it('middle and right are always orbit', () => {
     expect(baseBindingFor(1, null)).toBe('rotate')
-    expect(baseBindingFor(2, null)).toBe(null)
-    expect(baseBindingFor(2, MOUSE.PAN)).toBe(null)
+    expect(baseBindingFor(2, null)).toBe('rotate')
+    expect(baseBindingFor(2, MOUSE.PAN)).toBe('rotate')
     expect(baseBindingFor(1, MOUSE.PAN)).toBe('rotate')
   })
 
