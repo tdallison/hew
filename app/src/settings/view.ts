@@ -3,7 +3,7 @@
  *
  * Five small per-person preferences about how the viewport feels:
  *   - zoom wheel speed   (five stops, Slow to Fast; the middle is today's speed)
- *   - smooth camera      (animated camera moves and orbit inertia, default on)
+ *   - smooth camera      (animated camera moves, default on)
  *   - show tool hints    (the text that follows the pointer, default on)
  *   - show tool pointer  (the tool-shaped cursor icon, default on)
  *   - Measurements box position (top right or bottom right, default top right)
@@ -171,11 +171,6 @@ export const subscribeSmoothCamera = smoothCamera.subscribe
  */
 export function shouldAnimateCamera(durationMs: number, reducedMotion: boolean, smooth: boolean): boolean {
   return durationMs > 0 && !reducedMotion && smooth
-}
-
-/** Whether orbit/pan inertia (the coasting tail after a drag) is on. */
-export function inertiaEnabled(preciseOrbitHeld: boolean, smooth: boolean): boolean {
-  return smooth && !preciseOrbitHeld
 }
 
 // ---------------------------------------------------------------------------

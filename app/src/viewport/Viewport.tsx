@@ -4,9 +4,9 @@
  * Wires together:
  *   - THREE.js WebGL2 renderer + PerspectiveCamera
  *   - OrbitControls with SketchUp-style bindings:
- *       middle/right-drag → orbit
+ *       middle-drag → orbit; right-drag → pan
  *       wheel        → dolly toward cursor
- *     (pan is Shift+middle/right-drag or the Pan tool; Fly is a separate command)
+ *     (Shift switches orbit and pan; Fly is a separate command)
  *   - CueLayer (snap-point overlay, rebuilt each pointer move)
  *   - SnapService (wraps Scene.snap with ground-plane fallback)
  *   - SceneRenderer (live object + sketch geometry, refreshed after commits)
@@ -126,7 +126,7 @@ import { rayPlaneIntersect, subV3, addV3, perpComponentV3, type V3 } from './geo
 import { readAnnotation, commitAnnotationText, initialEditorText, type AnnotationSnapshot } from './annotationEdit'
 import { collectLeafIds, isDraftKind, nodeEq, nodeKey, nodeRefFromJs, resolveLabel, structuralSelection, treeIndexOf, type NodeRef, type SelectMode } from '../panels/treeModel'
 import { selectModeFor, isModifiedSelectPress } from './selectModifiers'
-import { baseBindingFor, desiredDragState, switchDragTo, orbitDragState, setPreciseOrbit, forceBaseAfterPress, type SwitchableDrag } from './orbitDragSwitch'
+import { baseBindingFor, desiredDragState, switchDragTo, orbitDragState, forceBaseAfterPress, type SwitchableDrag } from './orbitDragSwitch'
 import { MarqueeProjector, WINDOW_COVERAGE_MIN, boundsCoverage, emptyScreenBounds, normalizedRect, type MarqueeMode, type MarqueeRect, type ScreenBounds } from './marquee'
 import { dragMoveTargets, exceedsDragThreshold } from './dragMove'
 import { DragCommitGate } from './dragCommit'
@@ -168,11 +168,9 @@ import {
   getShowToolPointer,
   subscribeShowToolPointer,
   getSmoothCamera,
-  subscribeSmoothCamera,
   getZoomWheelSpeed,
   subscribeZoomWheelStop,
   shouldAnimateCamera,
-  inertiaEnabled,
   resolveToolCursor,
   mayReapplyToolCursor,
 } from '../settings/view'
@@ -7911,19 +7909,6 @@ export default function Viewport({
     // can dispose and recreate an OrbitControls bound to whichever camera
     // just became active — OrbitControls binds to one camera for its whole
     // lifetime, so a projection change can't just mutate `.object`.
-    // Precise orbit (docs/design/camera.md §7): Ctrl (Windows/Linux) / ⌘
-    // (macOS) HELD turns the camera's inertia off — damping disabled, so a
-    // drag tracks the pointer 1:1 and stops dead on release — for as long as
-    // the key is down. Tracked here so `configureControls` re-applies it to
-    // a rebuilt controls instance (a projection toggle mid-hold must not
-    // silently bring the inertia back). Shift is taken (pan) and Option is
-    // a window-manager drag on some Linux desktops; Ctrl/⌘ was the one free
-    // modifier that works everywhere (on macOS the OS turns a Ctrl+left
-    // press into a secondary click before the page sees it, so ⌘ is the one
-    // to hold there — the guide says so) — OrbitControls' own reading of it
-    // (invert the button) is overridden at press by `onOrbitPressForceBase`
-    // below.
-    let preciseOrbitHeld = false
     // The base binding (orbit or pan) of the mouse button currently held
     // down for a camera drag, or null when no switchable drag is live. Set
     // in `onCameraPointerDown` (a window CAPTURE listener, so it is current
@@ -7945,17 +7930,16 @@ export default function Viewport({
     // from `lastPointerClient`, the mid-drag switch's origin.
     const pointerRestClient = { x: 0, y: 0 }
     function configureControls(c: OrbitControls): void {
-      // Either temporary orbit button can be changed to pan with Shift.
+      // Shift switches either temporary navigation gesture to the other.
       // Fly is entered explicitly through its separate camera command.
       c.mouseButtons = {
         LEFT: null,
         MIDDLE: THREE.MOUSE.ROTATE,
-        RIGHT: THREE.MOUSE.ROTATE,
+        RIGHT: THREE.MOUSE.PAN,
       }
       c.zoomToCursor = true
-      c.enableDamping = inertiaEnabled(preciseOrbitHeld, getSmoothCamera())
+      c.enableDamping = false
       c.zoomSpeed = getZoomWheelSpeed()
-      c.dampingFactor = 0.08
       c.screenSpacePanning = true
       // From the world-length state, never re-hardcoded: a controls rebuild
       // (projection toggle, `setCamera`, a parallel Scene restore) used to
@@ -7996,12 +7980,8 @@ export default function Viewport({
     // zoom, zoomToCursor works for both — docs/design/camera.md §1).
     let controls = new OrbitControls(camera, renderer.domElement)
     configureControls(controls)
-    // Settings ▸ View, applied live: wheel speed, orbit inertia, and the
-    // tool pointer follow the setting without a reload.
+    // Apply wheel speed and tool pointer settings without a reload.
     const unsubscribeZoomWheelSpeed = subscribeZoomWheelStop(() => { controls.zoomSpeed = getZoomWheelSpeed() })
-    const unsubscribeSmoothCamera = subscribeSmoothCamera(() => {
-      controls.enableDamping = inertiaEnabled(preciseOrbitHeld, getSmoothCamera())
-    })
     const unsubscribeToolPointer = subscribeShowToolPointer(() => {
       // A live Shift-pan / Shift-fov / fov drag / eyedropper cursor wins; its
       // own restore reads the setting when the gesture ends.
@@ -8191,7 +8171,7 @@ export default function Viewport({
       retargetToCursorDepth(ev.clientX, ev.clientY)
     }
     function onRetargetPointerDownCapture(ev: PointerEvent): void {
-      // Middle and right orbit, while the left button drives OrbitControls
+      // Middle orbits and right pans, while the left button drives OrbitControls
       // when a camera tool is active. A pan
       // moves by the eye-to-target distance per pixel, so it too needs the
       // target at the depth under the cursor: a camera whose target sits a
@@ -8203,13 +8183,13 @@ export default function Viewport({
         ev.button === 1 || ev.button === 2 ||
         (ev.button === 0 && activeCameraTool !== null && activeCameraTool !== 'ZoomWindow')
       if (!drivesControls) return
-      const orbiting = (ev.button === 1 || ev.button === 2)
-        ? !ev.shiftKey
+      const orbiting = ev.button === 1 ? !ev.shiftKey
+        : ev.button === 2 ? ev.shiftKey
         : activeCameraTool === 'Orbit' && !ev.shiftKey || activeCameraTool === 'Pan' && ev.shiftKey
       retargetToCursorDepth(ev.clientX, ev.clientY, !orbiting)
     }
 
-    // Prevent the browser context menu from interrupting right-button orbit.
+    // Prevent the browser context menu from interrupting right-button navigation.
     function onContextMenu(ev: MouseEvent): void {
       ev.preventDefault()
     }
@@ -8405,17 +8385,9 @@ export default function Viewport({
     window.addEventListener('keydown', onShiftKeyDown)
     window.addEventListener('keyup', onShiftKeyUp)
 
-    // Precise orbit: Ctrl/⌘ HELD = no inertia (see `preciseOrbitHeld`).
-    // Keydown (not autorepeat) enters it — also stopping any coasting tail
-    // in flight, the most direct "stop" there is — and the release of the
-    // LAST held one of the pair leaves it (a keyup's own ctrlKey/metaKey
-    // already reflect the release). Entering it during a live camera drag
-    // is a hold, not a tap: reset the clean-tap trackers so the eventual
-    // release doesn't flip Scale's anchor / Push/Pull's mode.
+    // A modifier held during a camera drag must not count as a tool-mode tap.
     function onPreciseModifierKeyDown(ev: KeyboardEvent): void {
       if ((ev.key !== 'Control' && ev.key !== 'Meta') || ev.repeat) return
-      preciseOrbitHeld = true
-      setPreciseOrbit(controls, true)
       const live = orbitDragState(controls)
       if (live === 'rotate' || live === 'pan') {
         ctrlTap.reset()
@@ -8423,25 +8395,7 @@ export default function Viewport({
       }
       scheduleRender()
     }
-    function onPreciseModifierKeyUp(ev: KeyboardEvent): void {
-      if (ev.key !== 'Control' && ev.key !== 'Meta') return
-      if (ev.ctrlKey || ev.metaKey) return // the other one is still held
-      preciseOrbitHeld = false
-      setPreciseOrbit(controls, false)
-      controls.enableDamping = inertiaEnabled(false, getSmoothCamera())
-    }
-    // A blur swallows the keyup (Cmd-Tab is the canonical case: the ⌘ that
-    // switched apps is still down when focus leaves) — same posture as
-    // `onWindowBlurClearsShiftLock` just below.
-    function onWindowBlurClearsPreciseOrbit(): void {
-      if (!preciseOrbitHeld) return
-      preciseOrbitHeld = false
-      setPreciseOrbit(controls, false)
-      controls.enableDamping = inertiaEnabled(false, getSmoothCamera())
-    }
     window.addEventListener('keydown', onPreciseModifierKeyDown)
-    window.addEventListener('keyup', onPreciseModifierKeyUp)
-    window.addEventListener('blur', onWindowBlurClearsPreciseOrbit)
 
     // A blur (Cmd-Tab, devtools, another window) swallows the keyup that
     // would otherwise release Shift — without this, a tool's Shift-
@@ -11220,8 +11174,6 @@ export default function Viewport({
       window.removeEventListener('keydown', onShiftKeyDown)
       window.removeEventListener('keyup', onShiftKeyUp)
       window.removeEventListener('keydown', onPreciseModifierKeyDown)
-      window.removeEventListener('keyup', onPreciseModifierKeyUp)
-      window.removeEventListener('blur', onWindowBlurClearsPreciseOrbit)
       renderer.domElement.removeEventListener('pointerdown', onOrbitPressForceBase)
       window.removeEventListener('blur', onWindowBlurClearsShiftLock)
       window.removeEventListener('keydown', onCtrlKeyDown, true)
@@ -11286,7 +11238,6 @@ export default function Viewport({
       resizeObserver.disconnect()
       unsubscribeTheme()
       unsubscribeZoomWheelSpeed()
-      unsubscribeSmoothCamera()
       unsubscribeToolPointer()
       unsubscribeLengthUnit()
       disposeOriginAxes(originAxes)

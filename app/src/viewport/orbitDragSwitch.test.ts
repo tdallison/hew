@@ -10,7 +10,6 @@ import {
   desiredDragState,
   switchDragTo,
   stopInertia,
-  setPreciseOrbit,
   forceBaseAfterPress,
 } from './orbitDragSwitch'
 
@@ -57,10 +56,10 @@ describe('orbitDragState', () => {
 })
 
 describe('baseBindingFor / desiredDragState', () => {
-  it('middle and right are always orbit', () => {
+  it('middle orbits and right pans', () => {
     expect(baseBindingFor(1, null)).toBe('rotate')
-    expect(baseBindingFor(2, null)).toBe('rotate')
-    expect(baseBindingFor(2, MOUSE.PAN)).toBe('rotate')
+    expect(baseBindingFor(2, null)).toBe('pan')
+    expect(baseBindingFor(2, MOUSE.PAN)).toBe('pan')
     expect(baseBindingFor(1, MOUSE.PAN)).toBe('rotate')
   })
 
@@ -137,14 +136,7 @@ describe('precise orbit', () => {
     expect(c._panOffset.length()).toBe(0)
   })
 
-  it('setPreciseOrbit(true) disables damping and stops the tail; (false) restores damping', () => {
-    const c = fakeControls(ORBIT_STATE.ROTATE)
-    setPreciseOrbit(c, true)
-    expect(c.enableDamping).toBe(false)
-    expect(c._sphericalDelta.theta).toBe(0)
-    setPreciseOrbit(c, false)
-    expect(c.enableDamping).toBe(true)
-  })
+
 })
 
 describe('forceBaseAfterPress — Ctrl/⌘ means precise, only Shift inverts', () => {

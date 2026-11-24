@@ -9,7 +9,6 @@ import {
   getSmoothCamera,
   setSmoothCamera,
   shouldAnimateCamera,
-  inertiaEnabled,
   getShowToolHints,
   setShowToolHints,
   getShowToolPointer,
@@ -149,11 +148,6 @@ describe('smooth camera', () => {
     expect(shouldAnimateCamera(600, false, false)).toBe(false)
     expect(shouldAnimateCamera(600, true, true)).toBe(false)
     expect(shouldAnimateCamera(0, false, true)).toBe(false)
-  })
-  it('turns orbit inertia off with it, and when precise orbit is held', () => {
-    expect(inertiaEnabled(false, true)).toBe(true)
-    expect(inertiaEnabled(false, false)).toBe(false)
-    expect(inertiaEnabled(true, true)).toBe(false)
   })
   it('persists under hew.settings.smoothCamera', () => {
     setSmoothCamera(false)

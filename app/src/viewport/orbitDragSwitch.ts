@@ -16,16 +16,9 @@
  *    is held — so it also returns a Shift-started pan to an orbit when Shift
  *    is released, and inverts the Pan tool's left-drag the same way.
  *
- * 2. **Precise orbit** (no inertia) on Ctrl/⌘. `enableDamping` is what
- *    gives the camera its coasting tail — and, less obviously, its lag while
- *    the pointer is still moving (each frame applies only `dampingFactor`
- *    of the pending delta). `setPreciseOrbit(on)` turns damping off for as
- *    long as the modifier is held and drops whatever tail is in flight, so
- *    the camera tracks the pointer 1:1 and stops dead when it does.
- *    OrbitControls itself treats a Ctrl/⌘ press as another "invert the
- *    button" modifier; `forceBaseAfterPress` undoes that right after its
- *    pointerdown handler ran, so Ctrl/⌘ means precision, and only Shift
- *    means invert.
+ * 2. Ctrl/Cmd should not invert orbit and pan at pointerdown. The
+ *    forceBaseAfterPress helper restores the intended binding; only Shift
+ *    changes the gesture. Orbit and pan always run without damping.
  *
  * Both reach into OrbitControls' underscore-private fields. three.js does
  * not declare them (`OrbitControls.d.ts` exposes neither `state` nor the
@@ -95,11 +88,12 @@ export function orbitDragState(controls: OrbitControls): OrbitDragState {
  * The gesture a pressed button is bound to with no modifier held — the
  * "base" a Shift press inverts. `leftBinding` is the live
  * `controls.mouseButtons.LEFT` (null under Select and the draw tools, ROTATE
- * under Orbit, PAN under Pan, DOLLY under Zoom). Middle and right orbit.
+ * under Orbit, PAN under Pan, DOLLY under Zoom). Middle orbits; right pans.
  * Null when the button starts no switchable drag at all.
  */
 export function baseBindingFor(button: number, leftBinding: MOUSE | null | undefined): SwitchableDrag | null {
-  if (button === 1 || button === 2) return 'rotate'
+  if (button === 1) return 'rotate'
+  if (button === 2) return 'pan'
   if (button !== 0) return null
   if (leftBinding === MOUSE.ROTATE) return 'rotate'
   if (leftBinding === MOUSE.PAN) return 'pan'
@@ -147,18 +141,6 @@ export function stopInertia(controls: OrbitControls): void {
   c._panOffset.set(0, 0, 0)
 }
 
-/**
- * Precise mode: damping off (1:1 tracking, no tail) while `on`; the default
- * inertia back when it ends. Entering it also stops any tail in flight —
- * pressing the modifier during a coast is the most direct "stop" there is.
- */
-export function setPreciseOrbit(controls: OrbitControls, on: boolean): void {
-  const c = internals(controls)
-  if (c === null) return
-  if (on) stopInertia(controls)
-  c.enableDamping = !on
-}
-
 /** The slice of a pointerdown `forceBaseAfterPress` reads. */
 export interface OrbitPressKeys {
   button: number
@@ -171,7 +153,7 @@ export interface OrbitPressKeys {
 
 /**
  * Re-decide a press OrbitControls has already handled: a press with only
- * Ctrl/⌘ held (no Shift) asked for PRECISION, but OrbitControls' built-in
+ * Ctrl/⌘ held (no Shift) is present, but OrbitControls' built-in
  * "any modifier inverts the button" rule started the inverted gesture. Put
  * it back on the button's base binding at the press position. Returns true
  * when it switched. A Shift press — with or without Ctrl/⌘ — is a genuine

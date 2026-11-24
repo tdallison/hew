@@ -13,10 +13,7 @@ declare global {
  *  1. Shift pressed MID-DRAG inverts orbit <-> pan (and back on release),
  *     for both a left-drag under the Orbit tool and a middle-drag under the
  *     Select tool.
- *  2. Ctrl/Cmd held through a drag disables inertia (precise orbit, no
- *     coast); the default (no modifier) DOES coast; and pressing Ctrl mid-
- *     coast stops the tail immediately. A Ctrl-held drag still ORBITS (the
- *     target stays fixed) -- Ctrl asks for precision, not an invert.
+ *  2. Middle- and right-button orbit and pan stop immediately after a drag.
  */
 
 const CAMERA = {
@@ -148,91 +145,51 @@ test('Select tool (middle-drag): Shift mid-drag switches orbit to pan, and back 
   await page.mouse.up({ button: 'middle' })
 })
 
-test('Select tool (right-drag): orbit switches to pan and back without starting Fly', async ({ page }) => {
+test('Select tool (right-drag): pan switches to orbit and back without starting Fly', async ({ page }) => {
   const { cx, cy } = await setup(page)
   await page.keyboard.press(' ')
   await page.mouse.move(cx, cy)
   await page.mouse.down({ button: 'right' })
   const start = await getCam(page)
   await page.mouse.move(cx + 100, cy, { steps: 10 })
-  await page.waitForTimeout(50)
-  const orbited = await getCam(page)
-  expect(dist(orbited.target, start.target)).toBeLessThan(1e-6)
-  expect(dist(eyeDir(orbited), eyeDir(start))).toBeGreaterThan(0.01)
+  const panned = await getCam(page)
+  expect(dist(panned.target, start.target)).toBeGreaterThan(0.01)
+  expect(dist(eyeDir(panned), eyeDir(start))).toBeLessThan(0.02)
 
   await page.keyboard.down('Shift')
-  await page.waitForTimeout(100)
-  const beforePan = await getCam(page)
+  const beforeOrbit = await getCam(page)
   await page.mouse.move(cx + 200, cy, { steps: 10 })
-  await page.waitForTimeout(50)
-  const panned = await getCam(page)
-  expect(dist(panned.target, beforePan.target)).toBeGreaterThan(0.01)
-  expect(dist(eyeDir(panned), eyeDir(beforePan))).toBeLessThan(0.02)
+  const orbited = await getCam(page)
+  expect(dist(orbited.target, beforeOrbit.target)).toBeLessThan(1e-6)
+  expect(dist(eyeDir(orbited), eyeDir(beforeOrbit))).toBeGreaterThan(0.01)
 
   await page.keyboard.up('Shift')
-  await page.waitForTimeout(50)
-  const beforeOrbit = await getCam(page)
+  const beforePan = await getCam(page)
   await page.mouse.move(cx + 300, cy, { steps: 10 })
-  await page.waitForTimeout(50)
-  const orbitedAgain = await getCam(page)
-  expect(dist(orbitedAgain.target, beforeOrbit.target)).toBeLessThan(1e-6)
-  expect(dist(eyeDir(orbitedAgain), eyeDir(beforeOrbit))).toBeGreaterThan(0.01)
+  const pannedAgain = await getCam(page)
+  expect(dist(pannedAgain.target, beforePan.target)).toBeGreaterThan(0.01)
+  expect(dist(eyeDir(pannedAgain), eyeDir(beforePan))).toBeLessThan(0.02)
   await page.mouse.up({ button: 'right' })
 })
 
-test('Orbit tool: precise orbit (Ctrl/Cmd) kills inertia; the default drag coasts; Ctrl mid-coast stops the tail; Ctrl still orbits', async ({ page }) => {
-  const { cx, cy } = await setup(page)
-  await page.keyboard.press('o')
-  await page.waitForTimeout(100)
-
-  // 1) Default (no modifier): a fast drag keeps coasting after release.
-  await page.mouse.move(cx, cy)
-  await page.mouse.down()
-  await page.mouse.move(cx + 200, cy, { steps: 4 })
-  await page.mouse.up()
-  const immediate1 = await getCam(page)
-  await page.waitForTimeout(250)
-  const later1 = await getCam(page)
-  expect(dist(later1.position, immediate1.position)).toBeGreaterThan(1e-4)
-
-  // Reset to a clean pose before the next sub-case.
-  await page.evaluate((cam) => window.__hew_test!.setCamera(cam), CAMERA)
-  await page.waitForTimeout(200)
-
-  // 2) Ctrl/Cmd held throughout: no coast (identical samples), and the
-  // drag still ORBITS (target fixed, position moves) rather than inverting
-  // to pan -- Ctrl means precision, only Shift means invert. The press
-  // first sets the pivot at the depth under the cursor, so the target is
-  // sampled after it.
-  await page.keyboard.down('Control')
-  await page.mouse.move(cx, cy)
-  await page.mouse.down()
-  const camBefore2 = await getCam(page)
-  await page.mouse.move(cx + 200, cy, { steps: 4 })
-  await page.mouse.up()
-  const immediate2 = await getCam(page)
-  await page.waitForTimeout(250)
-  const later2 = await getCam(page)
-  await page.keyboard.up('Control')
-  expect(dist(later2.position, immediate2.position)).toBeLessThan(1e-6)
-  expect(dist(immediate2.target, camBefore2.target)).toBeLessThan(1e-6)
-  expect(dist(immediate2.position, camBefore2.position)).toBeGreaterThan(0.01)
-
-  // Reset again.
-  await page.evaluate((cam) => window.__hew_test!.setCamera(cam), CAMERA)
-  await page.waitForTimeout(200)
-
-  // 3) A fast drag with no modifier, released (coasting) -- pressing Ctrl
-  // mid-coast stops the tail within ~100ms.
-  await page.mouse.move(cx, cy)
-  await page.mouse.down()
-  await page.mouse.move(cx + 200, cy, { steps: 4 })
-  await page.mouse.up()
-  await page.keyboard.down('Control')
-  await page.waitForTimeout(100)
-  const stopped1 = await getCam(page)
-  await page.waitForTimeout(150)
-  const stopped2 = await getCam(page)
-  await page.keyboard.up('Control')
-  expect(dist(stopped2.position, stopped1.position)).toBeLessThan(1e-6)
-})
+for (const button of ['middle', 'right'] as const) {
+  for (const pan of [false, true]) {
+    test(`${button} ${pan ? 'pan' : 'orbit'} stops immediately after release`, async ({ page }) => {
+      const { cx, cy } = await setup(page)
+      await page.mouse.move(cx, cy)
+      const shift = button === 'middle' ? pan : !pan
+      if (shift) await page.keyboard.down('Shift')
+      await page.mouse.down({ button })
+      const before = await getCam(page)
+      await page.mouse.move(cx + 150, cy + 30, { steps: 4 })
+      await page.mouse.up({ button })
+      const immediate = await getCam(page)
+      await page.waitForTimeout(300)
+      const later = await getCam(page)
+      if (shift) await page.keyboard.up('Shift')
+      expect(dist(immediate.position, before.position)).toBeGreaterThan(0.01)
+      expect(dist(later.position, immediate.position)).toBeLessThan(1e-6)
+      expect(dist(later.target, immediate.target)).toBeLessThan(1e-6)
+    })
+  }
+}

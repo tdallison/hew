@@ -1,0 +1,518 @@
+--- a/app/src/viewport/cameraRig.ts
++++ b/app/src/viewport/cameraRig.ts
+@@ -299,21 +299,24 @@
+     return frustumHeight / (this.orthographic.zoom * 2 * referenceTanHalf)
+   }
+ 
+-  /** Perspective distance that fits a sphere of `radius` within the vertical
+-   * fov with `margin` slack (e.g. 1.2 — SketchUp's own Zoom Extents/standard-
++  /** Perspective distance that fits a sphere of `radius` within both axes
++   * with `margin` slack (e.g. 1.2 — SketchUp's own Zoom Extents/standard-
+    * view margin). Framing (`zoomExtents`/`setStandardView`) uses this for
+    * BOTH projections' camera *position* (see module doc) — only the
+    * orthographic *frustum* additionally needs `frameOrthoToRadius`. */
+-  perspectiveFramingDistance(radius: number, margin: number): number {
+-    return (radius * margin) / tanHalfFovRad(this.perspective.fov)
++  perspectiveFramingDistance(radius: number, margin: number, availableAspect = this.perspective.aspect): number {
++    const aspect = Number.isFinite(availableAspect) && availableAspect > 0 ? availableAspect : 1
++    const limitingHalfAngle = Math.atan(tanHalfFovRad(this.perspective.fov) * Math.min(1, aspect))
++    return (radius * margin) / Math.sin(limitingHalfAngle)
+   }
+ 
+   /** Size the orthographic frustum (half-height `radius · margin`, half-width
+    * scaled by `aspect`, zoom reset to 1) to fit a sphere of `radius` — the
+    * parallel-projection analogue of `perspectiveFramingDistance` (design §1,
+    * "Framing"). Does not touch camera position/orientation. */
+-  frameOrthoToRadius(radius: number, margin: number, aspect: number): void {
+-    const halfH = radius * margin
++  frameOrthoToRadius(radius: number, margin: number, aspect: number, availableAspect = aspect): void {
++    const fitAspect = Number.isFinite(availableAspect) && availableAspect > 0 ? availableAspect : 1
++    const halfH = radius * margin * Math.max(1, 1 / fitAspect)
+     const halfW = halfH * aspect
+     this.orthographic.left = -halfW
+     this.orthographic.right = halfW
+--- a/app/src/viewport/cameraRig.test.ts
++++ b/app/src/viewport/cameraRig.test.ts
+@@ -188,14 +188,31 @@
+     expect(rig.orthographic.left).toBeCloseTo(-4.8 * 1.5, 9)
+     expect(rig.orthographic.zoom).toBe(1)
+   })
++
++  it('fits both axes in a portrait viewport and in the area left by docks', () => {
++    const rig = new CameraRig(0.5)
++    rig.frameOrthoToRadius(4, 1.2, 0.5)
++    expect(rig.orthographic.right).toBeCloseTo(4.8, 9)
++    expect(rig.orthographic.top).toBeCloseTo(9.6, 9)
++    rig.frameOrthoToRadius(4, 1.2, 2, 0.5)
++    expect(rig.orthographic.top).toBeCloseTo(9.6, 9)
++    expect(rig.orthographic.right).toBeCloseTo(19.2, 9)
++  })
+ })
+ 
+ describe('CameraRig — perspectiveFramingDistance', () => {
+-  it('matches radius * margin / tanHalfFov', () => {
++  it('fits the entire sphere including its depth within the limiting field of view', () => {
+     const rig = new CameraRig(1)
+     rig.setFov(60)
+     const d = rig.perspectiveFramingDistance(5, 1.2)
+-    expect(d).toBeCloseTo((5 * 1.2) / tanHalfFovRad(60), 9)
++    expect(d).toBeCloseTo((5 * 1.2) / Math.sin(Math.PI / 6), 9)
++  })
++
++  it('uses the horizontal field of view in a narrow available area', () => {
++    const rig = new CameraRig(0.5)
++    const halfAngle = Math.atan(tanHalfFovRad(45) * 0.5)
++    expect(rig.perspectiveFramingDistance(5, 1.2)).toBeCloseTo(6 / Math.sin(halfAngle), 9)
++    expect(rig.perspectiveFramingDistance(5, 1.2, 0.25)).toBeGreaterThan(rig.perspectiveFramingDistance(5, 1.2))
+   })
+ })
+ 
+--- a/app/src/viewport/orbitDragSwitch.ts
++++ b/app/src/viewport/orbitDragSwitch.ts
+@@ -95,15 +95,11 @@
+  * The gesture a pressed button is bound to with no modifier held — the
+  * "base" a Shift press inverts. `leftBinding` is the live
+  * `controls.mouseButtons.LEFT` (null under Select and the draw tools, ROTATE
+- * under Orbit, PAN under Pan, DOLLY under Zoom). Middle is always orbit;
+- * right is Fly's (`configureControls` sets RIGHT: null) and starts no
+- * switchable drag. Null when the button starts no switchable drag at all.
++ * under Orbit, PAN under Pan, DOLLY under Zoom). Middle and right orbit.
++ * Null when the button starts no switchable drag at all.
+  */
+ export function baseBindingFor(button: number, leftBinding: MOUSE | null | undefined): SwitchableDrag | null {
+-  if (button === 1) return 'rotate'
+-  // The right button is Fly's (docs/design/fly-navigation.md §3.1), not a
+-  // pan: it never starts a switchable drag.
+-  if (button === 2) return null
++  if (button === 1 || button === 2) return 'rotate'
+   if (button !== 0) return null
+   if (leftBinding === MOUSE.ROTATE) return 'rotate'
+   if (leftBinding === MOUSE.PAN) return 'pan'
+--- a/app/src/viewport/orbitDragSwitch.test.ts
++++ b/app/src/viewport/orbitDragSwitch.test.ts
+@@ -57,10 +57,10 @@
+ })
+ 
+ describe('baseBindingFor / desiredDragState', () => {
+-  it('middle is always orbit; right is Fly, never a switchable drag', () => {
++  it('middle and right are always orbit', () => {
+     expect(baseBindingFor(1, null)).toBe('rotate')
+-    expect(baseBindingFor(2, null)).toBe(null)
+-    expect(baseBindingFor(2, MOUSE.PAN)).toBe(null)
++    expect(baseBindingFor(2, null)).toBe('rotate')
++    expect(baseBindingFor(2, MOUSE.PAN)).toBe('rotate')
+     expect(baseBindingFor(1, MOUSE.PAN)).toBe('rotate')
+   })
+ 
+--- a/app/src/viewport/Viewport.tsx
++++ b/app/src/viewport/Viewport.tsx
+@@ -4,10 +4,9 @@
+  * Wires together:
+  *   - THREE.js WebGL2 renderer + PerspectiveCamera
+  *   - OrbitControls with SketchUp-style bindings:
+- *       middle-drag  → orbit
++ *       middle/right-drag → orbit
+  *       wheel        → dolly toward cursor
+- *     (right-drag is Fly — docs/design/fly-navigation.md — not a pan;
+- *      pan is Shift+middle-drag or the Pan tool)
++ *     (pan is Shift+middle/right-drag or the Pan tool; Fly is a separate command)
+  *   - CueLayer (snap-point overlay, rebuilt each pointer move)
+  *   - SnapService (wraps Scene.snap with ground-plane fallback)
+  *   - SceneRenderer (live object + sketch geometry, refreshed after commits)
+@@ -5692,62 +5691,11 @@
+       expandByVisibleObject(box, sceneRenderer.sketchGroup)
+       if (box.isEmpty()) return
+ 
+-      const center = new THREE.Vector3()
+-      box.getCenter(center)
+-      const size = new THREE.Vector3()
+-      box.getSize(size)
+-
+-      // Fit the bounding sphere to the vertical FOV with a 1.2× margin.
+-      // `perspectiveFramingDistance` uses the rig's (persisted-across-toggle)
+-      // perspective fov regardless of the ACTIVE projection — both
+-      // projections place the camera at the same distance from the target;
+-      // only parallel projection additionally needs its frustum sized
+-      // (design §1, "Framing"), since ortho's apparent size doesn't track
+-      // distance at all.
+-      const halfDiag = box.getBoundingSphere(new THREE.Sphere()).radius
+-      const distance = rig.perspectiveFramingDistance(halfDiag, 1.2)
+-
+-      // Re-derive the view limits from THIS fit distance (delta-review
+-      // Finding 1) — the scene bounding box just measured is the one piece
+-      // of ground truth that is never stale, unlike `minDistance`/
+-      // `maxDistance`/`near`/`far`, which a rescale scales but an UNDO of
+-      // that rescale never restores (camera/view state is intentionally
+-      // outside undo — see `applyRescaleToView`'s doc comment). Left at
+-      // their old scaled values, they can permanently floor how far Zoom
+-      // Extents can dolly back in, compounding across repeated rescales.
+-      // Assigning fresh limits here — proportional to the SAME fit distance
+-      // the re-pose below uses — makes Zoom Extents the universal recovery
+-      // action at any model scale, and must happen BEFORE `controls.update()`
+-      // clamps the eye→target distance, exactly like `applyRescaleToView`.
+-      //
+-      // Routed through the shared `syncWorldLengthViewState` (delta-review
+-      // Finding 1) rather than assigning `limits` directly: the fresh
+-      // `far` this resync computes must carry the grid footprint and axes
+-      // half-length along with it in the same lockstep, or a big enough
+-      // fit distance pushes `far` past the fixed axes/grid extent and their
+-      // ends become visible mid-scene. The ratio is `far`'s own before/after
+-      // — `scaleViewLimits` applied to the CURRENT (possibly already
+-      // rescaled) limits at that ratio reproduces the exact same absolute
+-      // `limits` `zoomExtentsViewLimits` derives from ground truth, because
+-      // every path that has touched these limits already scaled all four
+-      // fields by one consistent factor from `MOUNT_LIMITS` — so recovering
+-      // via a ratio is exactly as self-healing here as the absolute
+-      // recompute it replaces, while also being the form the grid/axes need.
+-      const limits = zoomExtentsViewLimits(distance)
+-      const ratio = limits.far / worldLimits.far
+-      syncWorldLengthViewState(ratio)
+-
+-      // Keep the current view direction; re-target at box center.
+-      const dir = new THREE.Vector3()
+-      dir.subVectors(camera.position, controls.target).normalize()
+-      controls.target.copy(center)
+-      camera.position.copy(center).addScaledVector(dir, distance)
+-      if (rig.projection === 'parallel') {
+-        rig.frameOrthoToRadius(halfDiag, 1.2, el.clientWidth / el.clientHeight)
+-      }
+-      camera.updateProjectionMatrix()
+-      controls.update()
+-      scheduleRender()
++      // Use the same viewport- and dock-aware fit as selection framing.
++      zoomToWorldBounds(
++        [box.min.x, box.min.y, box.min.z],
++        [box.max.x, box.max.y, box.max.z],
++      )
+     }
+ 
+     /** See `ViewportApi.zoomToWorldBounds`'s doc comment — the same framing
+@@ -5778,8 +5726,8 @@
+         left *= (w * 0.8) / covered
+         right *= (w * 0.8) / covered
+       }
+-      const widthFit = left + right > 0 ? Math.max(1, h / (w - left - right)) : 1
+-      const distance = rig.perspectiveFramingDistance(halfDiag, 1.2) * widthFit
++      const availableAspect = (w - left - right) / h
++      const distance = rig.perspectiveFramingDistance(halfDiag, 1.2, availableAspect)
+ 
+       const limits = zoomExtentsViewLimits(distance)
+       const ratio = limits.far / worldLimits.far
+@@ -5798,14 +5746,14 @@
+         rightDir.normalize()
+         const halfH =
+           rig.projection === 'parallel'
+-            ? halfDiag * 1.2 * widthFit
++            ? halfDiag * 1.2 * Math.max(1, 1 / availableAspect)
+             : distance * Math.tan(THREE.MathUtils.degToRad(rig.perspective.fov) / 2)
+         target.addScaledVector(rightDir, shift * ((2 * halfH) / h))
+       }
+       controls.target.copy(target)
+       camera.position.copy(target).addScaledVector(dir, distance)
+       if (rig.projection === 'parallel') {
+-        rig.frameOrthoToRadius(halfDiag * widthFit, 1.2, el.clientWidth / el.clientHeight)
++        rig.frameOrthoToRadius(halfDiag, 1.2, w / h, availableAspect)
+       }
+       camera.updateProjectionMatrix()
+       controls.update()
+@@ -7958,7 +7906,7 @@
+ 
+     // ------------------------------------------------------------------ OrbitControls
+     // middle-drag = orbit, Shift+middle-drag = pan, wheel = dolly-to-cursor;
+-    // right-drag is Fly's, outside OrbitControls (RIGHT: null). Extracted
++    // Middle and right drags share the same OrbitControls switching. Extracted
+     // (docs/design/camera.md §1) so `rebindControlsForProjectionChange` below
+     // can dispose and recreate an OrbitControls bound to whichever camera
+     // just became active — OrbitControls binds to one camera for its whole
+@@ -7997,16 +7945,12 @@
+     // from `lastPointerClient`, the mid-drag switch's origin.
+     const pointerRestClient = { x: 0, y: 0 }
+     function configureControls(c: OrbitControls): void {
+-      // RIGHT is null, not PAN: the right button is Fly's (docs/design/
+-      // fly-navigation.md §3.1, §5 — "configureControls sets RIGHT: null so
+-      // OrbitControls never starts a pan on the button Fly owns"). Pan stays
+-      // on Shift+middle (OrbitControls' own modifier inversion) and the Pan
+-      // tool. A projection toggle rebuilds the instance through this same
+-      // function, so the binding survives it.
++      // Either temporary orbit button can be changed to pan with Shift.
++      // Fly is entered explicitly through its separate camera command.
+       c.mouseButtons = {
+         LEFT: null,
+         MIDDLE: THREE.MOUSE.ROTATE,
+-        RIGHT: null,
++        RIGHT: THREE.MOUSE.ROTATE,
+       }
+       c.zoomToCursor = true
+       c.enableDamping = inertiaEnabled(preciseOrbitHeld, getSmoothCamera())
+@@ -8173,7 +8117,7 @@
+      * the pivot where it is": a grazing ray meeting z = 0 hundreds of
+      * metres away is exactly the off-screen pole the fix removes.
+      */
+-    function pickDepthAlongRay(ray: Ray): number | null {
++    function pickDepthAlongRay(ray: Ray, allowGround = true): number | null {
+       // Geometry, not input: the pivot is a camera question, so it lands on
+       // the model in Wireframe too, where faces are no editing targets
+       // (`pick_face_geometry` ignores the render mode's face policy).
+@@ -8199,6 +8143,7 @@
+           region.free()
+         }
+       }
++      if (!allowGround) return null
+       const ground = intersectGroundPlane(ray)
+       if (ground !== null) {
+         const depth = Math.hypot(ground.x - ray.origin[0], ground.y - ray.origin[1], ground.z - ray.origin[2])
+@@ -8216,14 +8161,14 @@
+      * floor) and the orbit pivots at that surface's depth — "orbit around
+      * what I'm pointing at". See cameraDepth.ts for the full rationale.
+      */
+-    function retargetToCursorDepth(clientX: number, clientY: number): void {
++    function retargetToCursorDepth(clientX: number, clientY: number, allowGround = true): void {
+       if (!controls.enabled) return
+       const r = renderer.domElement.getBoundingClientRect()
+       if (r.width <= 0 || r.height <= 0) return
+       const ndcX = ((clientX - r.left) / r.width) * 2 - 1
+       const ndcY = -((clientY - r.top) / r.height) * 2 + 1
+       const ray = makeWorldRay(ndcX, ndcY, camera)
+-      const depth = pickDepthAlongRay(ray)
++      const depth = pickDepthAlongRay(ray, allowGround)
+       if (depth === null) return
+       const hit: [number, number, number] = [
+         ray.origin[0] + ray.direction[0] * depth,
+@@ -8246,9 +8191,8 @@
+       retargetToCursorDepth(ev.clientX, ev.clientY)
+     }
+     function onRetargetPointerDownCapture(ev: PointerEvent): void {
+-      // Middle button = orbit (configureControls), and the left button
+-      // drives OrbitControls while a camera tool is active; the right button
+-      // is Fly (its own block below), which has no pivot to retarget. A pan
++      // Middle and right orbit, while the left button drives OrbitControls
++      // when a camera tool is active. A pan
+       // moves by the eye-to-target distance per pixel, so it too needs the
+       // target at the depth under the cursor: a camera whose target sits a
+       // hand's width from the eye (a SketchUp scene placed with Look Around)
+@@ -8256,15 +8200,16 @@
+       // (Zoom Window draws its own rectangle and scales from the distance it
+       // finds afterwards; OrbitControls does not drive that press.)
+       const drivesControls =
+-        ev.button === 1 ||
++        ev.button === 1 || ev.button === 2 ||
+         (ev.button === 0 && activeCameraTool !== null && activeCameraTool !== 'ZoomWindow')
+       if (!drivesControls) return
+-      retargetToCursorDepth(ev.clientX, ev.clientY)
+-    }
+-
+-    // Prevent the browser context menu on the canvas: the right button is
+-    // Fly's hold-to-fly engagement (docs/design/fly-navigation.md §3.1), and
+-    // a menu popping on the press or release would interrupt it.
++      const orbiting = (ev.button === 1 || ev.button === 2)
++        ? !ev.shiftKey
++        : activeCameraTool === 'Orbit' && !ev.shiftKey || activeCameraTool === 'Pan' && ev.shiftKey
++      retargetToCursorDepth(ev.clientX, ev.clientY, !orbiting)
++    }
++
++    // Prevent the browser context menu from interrupting right-button orbit.
+     function onContextMenu(ev: MouseEvent): void {
+       ev.preventDefault()
+     }
+@@ -10634,10 +10579,8 @@
+     window.addEventListener('keydown', onKeyDownTracked)
+ 
+     // ------------------------------------------------------------------ Fly (docs/design/fly-navigation.md)
+-    // Hold the right button on the canvas to fly under ANY tool (§3.1): the
+-    // mouse looks (§3.2), W A S D / Q E move (§3.3), the wheel sets the
+-    // speed, Shift sprints. Camera ▸ Fly LATCHES the same flight on for
+-    // trackpads (§10): the keys move, a two-finger scroll looks, a pinch
++    // Camera ▸ Fly enables flight: the mouse looks, W A S D / Q E move,
++    // the wheel sets the speed, and Shift sprints. A two-finger scroll looks, a pinch
+     // (ctrl+wheel in every engine) sets the speed, Escape latches off, and a
+     // right-button hold inside a latched flight behaves exactly like the
+     // hold. Neither is a tool or a mode the tool stack knows about: the
+@@ -10970,7 +10913,7 @@
+ 
+     function onFlyPointerDownCapture(ev: PointerEvent): void {
+       if (ev.pointerType === 'touch') return
+-      if (ev.button === 2) {
++      if (ev.button === 2 && flyLatched) {
+         flyHoldBegin(ev)
+         return
+       }
+@@ -11003,7 +10946,7 @@
+       const rightNow = (ev.buttons & 2) !== 0
+       const rightWas = (prev & 2) !== 0
+       // A chorded right press (another button was already down).
+-      if (!flyHold && rightNow && !rightWas && ev.button === 2) {
++      if (flyLatched && !flyHold && rightNow && !rightWas && ev.button === 2) {
+         flyHoldBegin(ev)
+         return
+       }
+--- a/app/src/App.tsx
++++ b/app/src/App.tsx
+@@ -51,6 +51,7 @@
+ import { ConfirmDialog } from './panels/ConfirmDialog'
+ import { ScenesPanel, ScenesAddButton, useSceneRenameState } from './panels/ScenesPanel'
+ import { ObjectInfoPanel } from './panels/ObjectInfoPanel'
++import { worldBoundsForSelection } from './panels/objectBounds'
+ import { TraySection } from './panels/TraySection'
+ import { ChangesPanel } from './panels/ChangesPanel'
+ import { ModelHealthPanel, selectionObjectIds } from './panels/ModelHealthPanel'
+@@ -4130,6 +4131,12 @@
+   const handleZoomExtents = useCallback(() => {
+     viewportApi.current?.zoomExtents()
+   }, [])
++  const handleFocusSelection = useCallback(() => {
++    const scene = sceneRef.current
++    if (scene === null) return
++    const bounds = worldBoundsForSelection(scene, selectedIds)
++    if (bounds !== null) viewportApi.current?.zoomToWorldBounds([...bounds.min], [...bounds.max])
++  }, [selectedIds])
+ 
+   // ---------------------------------------------------------------- glTF export
+   const exportGltf = useCallback(async () => {
+@@ -5635,8 +5642,7 @@
+       case 'tool-zoom-window': activateTool('Zoom Window'); break
+       /* oxlint-enable lingui/no-unlocalized-strings */
+       case 'toggle-parallel-projection': viewportApi.current?.toggleProjection(); break
+-      // Camera ▸ Fly (docs/design/fly-navigation.md §10): the LATCHED fly
+-      // mode for trackpads — a hold of the right button needs no menu.
++      // Camera ▸ Fly is the separate flight mode.
+       case 'toggle-fly':          viewportApi.current?.toggleFlyLatched(); break
+       // Window pane toggles — must use functional updaters (StrictMode safe)
+       case 'toggle-model-info':   toggleSection(setShowModelInfo, trayTitle.outliner); break
+@@ -7301,6 +7307,7 @@
+           clipboardHasContent: menuGates?.clipboardHasContent ?? false,
+         }}
+         onZoomExtents={handleZoomExtents}
++        onFocusSelection={handleFocusSelection}
+         onStandardView={(view) => viewportApi.current?.setStandardView(view)}
+         parallelProjectionChecked={parallelProjection}
+         onToggleParallelProjection={() => viewportApi.current?.toggleProjection()}
+--- a/app/src/panels/MenuBar.tsx
++++ b/app/src/panels/MenuBar.tsx
+@@ -233,6 +233,8 @@
+   }
+   /** Zoom the camera to fit all scene geometry (View → Zoom Extents). */
+   onZoomExtents?: () => void
++  /** Frame the selected objects, groups, or component instances. */
++  onFocusSelection?: () => void
+   /** View ▸ Scenes ▸ Add Scene (docs/design/scenes.md §5). */
+   onScenesAdd?: () => void
+   /** View ▸ Scenes ▸ Update Scene — re-captures the active Scene's checked
+@@ -257,9 +259,7 @@
+   parallelProjectionChecked?: boolean
+   /** Toggle Camera ▸ Parallel Projection. */
+   onToggleParallelProjection?: () => void
+-  /** Camera ▸ Fly check state — the LATCHED fly mode (docs/design/
+-   *  fly-navigation.md §10), for trackpads; a right-button hold flies
+-   *  under any tool without it. */
++  /** Camera ▸ Fly check state. */
+   flyChecked?: boolean
+   /** Toggle Camera ▸ Fly. */
+   onToggleFly?: () => void
+@@ -788,6 +788,7 @@
+   onEditAction,
+   editGates,
+   onZoomExtents,
++  onFocusSelection,
+   onDrawText,
+   onScenesAdd,
+   onScenesUpdate,
+@@ -1318,9 +1319,7 @@
+               checked={activeTool === T.LookAround}
+               onClick={withClose(() => onSelectTool?.(T.LookAround))}
+             />
+-            {/* Fly (docs/design/fly-navigation.md): hold the right mouse
+-                button to fly under any tool; this entry LATCHES the same
+-                flight on for trackpads (§10) — a check, not a tool. */}
++            {/* Fly remains available as an explicit camera mode. */}
+             <CheckMenuItem
+               label={t`Fly`}
+               checked={flyChecked ?? false}
+@@ -1338,6 +1337,10 @@
+             <MenuItem
+               label={t`Zoom Extents`}
+               onClick={withClose(() => onZoomExtents?.())}
++            />
++            <MenuItem
++              label={t`Focus Selection`}
++              onClick={withClose(() => onFocusSelection?.())}
+             />
+             <div style={SEPARATOR_STYLE} />
+             <CheckMenuItem
+--- a/app/e2e/camera-drag-switch.spec.ts
++++ b/app/e2e/camera-drag-switch.spec.ts
+@@ -148,6 +148,38 @@
+   await page.mouse.up({ button: 'middle' })
+ })
+ 
++test('Select tool (right-drag): orbit switches to pan and back without starting Fly', async ({ page }) => {
++  const { cx, cy } = await setup(page)
++  await page.keyboard.press(' ')
++  await page.mouse.move(cx, cy)
++  await page.mouse.down({ button: 'right' })
++  const start = await getCam(page)
++  await page.mouse.move(cx + 100, cy, { steps: 10 })
++  await page.waitForTimeout(50)
++  const orbited = await getCam(page)
++  expect(dist(orbited.target, start.target)).toBeLessThan(1e-6)
++  expect(dist(eyeDir(orbited), eyeDir(start))).toBeGreaterThan(0.01)
++
++  await page.keyboard.down('Shift')
++  await page.waitForTimeout(100)
++  const beforePan = await getCam(page)
++  await page.mouse.move(cx + 200, cy, { steps: 10 })
++  await page.waitForTimeout(50)
++  const panned = await getCam(page)
++  expect(dist(panned.target, beforePan.target)).toBeGreaterThan(0.01)
++  expect(dist(eyeDir(panned), eyeDir(beforePan))).toBeLessThan(0.02)
++
++  await page.keyboard.up('Shift')
++  await page.waitForTimeout(50)
++  const beforeOrbit = await getCam(page)
++  await page.mouse.move(cx + 300, cy, { steps: 10 })
++  await page.waitForTimeout(50)
++  const orbitedAgain = await getCam(page)
++  expect(dist(orbitedAgain.target, beforeOrbit.target)).toBeLessThan(1e-6)
++  expect(dist(eyeDir(orbitedAgain), eyeDir(beforeOrbit))).toBeGreaterThan(0.01)
++  await page.mouse.up({ button: 'right' })
++})
++
+ test('Orbit tool: precise orbit (Ctrl/Cmd) kills inertia; the default drag coasts; Ctrl mid-coast stops the tail; Ctrl still orbits', async ({ page }) => {
+   const { cx, cy } = await setup(page)
+   await page.keyboard.press('o')
+--- /dev/null
++++ b/docs/CAMERA-SKETCHUP-PARITY.md
+@@ -0,0 +1,34 @@
++# Camera navigation: SketchUp reference and Hew work
++
++## Direct reference observations
++
++In SketchUp Make 2017, the Camera menu lists Previous and Next views,
++perspective and parallel projection, Orbit (O), Pan (H), Zoom (Z), and Zoom
++Extents. With Orbit active, its status bar identifies Shift as Pan and Ctrl
++as suspending gravity. An Orbit drag changed the view of the open sauna model;
++Camera > Previous restored the earlier view. These observations do not establish
++the exact orbit pivot, speed, scroll behavior, or behavior at the poles.
++
++## Hew changes
++
++- Middle and right drag orbit; Shift switches a drag to pan. Fly remains a
++  separate Camera command. Hew currently uses Ctrl for precise orbit, which
++  differs from the SketchUp status bar's gravity behavior.
++- An orbit starting over empty space retains the current target instead of
++  choosing an artificial ground-plane pivot. This is a design choice pending
++  direct reference comparison.
++- Zoom Extents and object framing use aspect-aware bounding-sphere fitting,
++  including the space covered by side panels, in perspective and parallel.
++- Camera > Focus Selection currently frames selected objects, groups, and
++  component instances. Individual sketch geometry is not yet supported.
++- The existing 45-degree default field of view is retained.
++
++## Remaining work and validation
++
++Previous/Next camera history is not implemented. Interactive comparisons with
++the same model in Hew and SketchUp, including wheel zoom, active modeling
++tools, openings, poles, resize, and saved-project reopening, remain to be run.
++The former right-hold-to-Fly end-to-end tests describe the old binding and
++must be updated for the separate Fly command before the full browser suite is
++considered current. The extracted source checkout requires its generated WASM
++package and Rust toolchain for a complete build and browser tests.

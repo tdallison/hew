@@ -11,9 +11,9 @@ the exact orbit pivot, speed, scroll behavior, or behavior at the poles.
 
 ## Hew changes
 
-- Middle and right drag orbit; Shift switches a drag to pan. Fly remains a
-  separate Camera command. Hew currently uses Ctrl for precise orbit, which
-  differs from the SketchUp status bar's gravity behavior.
+- Middle drag orbits and right drag pans; Shift switches between orbit and
+  pan during either drag. Fly remains a separate Camera command. Orbit and
+  pan have no inertia.
 - An orbit starting over empty space retains the current target instead of
   choosing an artificial ground-plane pivot. This is a design choice pending
   direct reference comparison.

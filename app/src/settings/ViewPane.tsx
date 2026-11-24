@@ -100,8 +100,8 @@ export function ViewPane() {
       </SettingsRow>
       <SettingsNote>
         <Trans>
-          Views, scenes, and zoom fly into place, and orbiting coasts to a stop. Turn this off and the camera
-          jumps straight there and stops the moment you let go.
+          Views, scenes, and zoom fly into place. Turn this off and the camera jumps straight there.
+          Orbit and pan always stop as soon as you stop dragging.
         </Trans>
       </SettingsNote>
 
